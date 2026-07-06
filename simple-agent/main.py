@@ -1,4 +1,4 @@
-import requests
+import requests # to make external api call
 from dotenv import load_dotenv,find_dotenv
 
 from langchain.agents import create_agent # function to create a agent 
