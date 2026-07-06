@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 import requests
 from dotenv import load_dotenv, find_dotenv
 
@@ -39,7 +38,7 @@ def locate_user(runtime:ToolRuntime[Context]):
             return "Unknown"
 
 model = init_chat_model(
-    model='qwen/qwen3-32b',
+    model='llama-3.3-70b-versatile',
     model_provider="groq",
     temperature=0.3
 )
@@ -71,7 +70,6 @@ r = agent.invoke(
     config=config,
     context=Context(user_id='user_1'))
 
-print(r)
 print(r['structured_response'])
 
 
@@ -84,5 +82,4 @@ r = agent.invoke(
     config=config,
     context=Context(user_id='user_1'))
 
-print(r)
-print(r['structured_response'])
+print(r['structured_response'].summary)
