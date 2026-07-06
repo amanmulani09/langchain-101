@@ -12,14 +12,5 @@ model = init_chat_model(
     temperature=0.1
 )
 
-conversation = [
-    SystemMessage('You are a helpful assistant who answers for programming questions'),
-    HumanMessage('what is python'),
-    AIMessage('pythono is a interpreted programming language.'),
-    HumanMessage('when was it released?')
-]
-
-r = model.invoke(conversation)
-
-print(r)
-print(r.content)
+for chunks in model.stream("what is python"):
+    print(chunks.text,end='',flush=True)
