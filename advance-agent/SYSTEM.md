@@ -199,11 +199,42 @@ Concrete trace for *"what is the weather like"*:
 
 ---
 
+## 5b. Guardrails & evaluation
+
+Two different quality mechanisms, easily confused in interviews:
+
+**Guardrails — runtime, in the request path (`guardrails.py`).** Cheap,
+deterministic, rule-based (no extra LLM call, ~zero latency):
+- *Input* (`check_input`, before the model): message length cap + prompt-
+  injection pattern match. Trips → `400` (client's fault).
+- *Output* (`check_output`, after the model): plausible temperature range,
+  humidity ∈ [0,100], and °C/°F internal consistency. Trips → `502` (our fault
+  — the model produced something incoherent, so we don't ship it).
+- Wired via a FastAPI exception handler that maps `stage → status`.
+- Upgrade path: add an LLM-as-judge guardrail for semantic checks
+  (toxicity, off-topic, PII) where rules can't reach.
+
+**Evaluation — offline, out of the request path (`evaluation.py`).** A fixed
+dataset run through the real agent, scored on *properties* (you can't string-
+match a non-deterministic LLM):
+- `structured_ok` — returned a valid `ResponseFormat`.
+- `output_valid` — passes the output guardrails.
+- `city_grounded` — the correct city (from `user_id`) appears in the tool trace,
+  i.e. `locate_user` → `get_weather` wired up correctly.
+- Emits per-metric pass rates. Run it when you change the model, prompt, or
+  tools to catch regressions before they ship.
+
+The relationship: **guardrails protect each live request; evaluation measures
+aggregate quality across releases.** Guardrail functions are reused inside the
+eval (`check_output`), so the two stay consistent.
+
 ## 6. Failure modes & handling
 
 | Failure | Where | Response |
 |---------|-------|----------|
 | Malformed request body | Pydantic | `422` before handler runs |
+| Oversized / injection input | `check_input` | `400` before the model runs |
+| Incoherent model output | `check_output` | `502`, answer withheld |
 | Unknown / expired `thread_id` | `_resolve_thread` | `404` → client re-inits |
 | Unknown `session_id` on chat init | `create_thread` | `404` → client re-logs-in |
 | Weather API down / slow | `get_weather` | tool returns `{error}`, agent copes; request still `200` |
@@ -243,8 +274,12 @@ Ordered by what an interviewer usually probes:
    weather calls; a semaphore or queue to cap concurrent model calls; response
    caching for identical city lookups.
 
-6. **Observability.** Structured logs (already started), request tracing across
-   the agent loop, token-usage + latency metrics per model call.
+6. **Observability.** Structured logs (already started) plus **LangSmith**:
+   LangChain/LangGraph auto-trace every agent run, tool call, and LLM call when
+   `LANGSMITH_TRACING`/`LANGSMITH_API_KEY` are set — giving per-step traces,
+   token usage, and latency in a UI with zero code change. LangSmith also hosts
+   the eval datasets + experiments (`evaluation_langsmith.py`), so runtime
+   traces and offline scores live in one place.
 
 7. **Safety.** Rate limiting per user, input size caps, and prompt-injection
    hardening on tool outputs.

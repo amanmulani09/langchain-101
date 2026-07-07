@@ -4,11 +4,12 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv, find_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from langgraph.checkpoint.memory import InMemorySaver
 
 from agent import build_agent
 from config import get_settings
+from guardrails import GuardrailViolation, check_input, check_output
 from schemas import (
     ChatRequest,
     ChatResponse,
@@ -35,9 +36,14 @@ async def lifespan(app: FastAPI):
     across workers — swap for a durable checkpointer (SQLite/Postgres) if you
     need persistence or multi-worker deployments.
     """
+    settings = get_settings()
     app.state.agent = build_agent(InMemorySaver())
     app.state.sessions = SessionStore()
     logger.info("agent ready (short-term in-memory checkpointer)")
+    if settings.langsmith_tracing:
+        logger.info("LangSmith tracing ON (project: %s)", settings.langsmith_project)
+    else:
+        logger.info("LangSmith tracing OFF (set LANGSMITH_TRACING=true to enable)")
     yield
 
 
@@ -66,6 +72,17 @@ def _resolve_thread(http_request: Request, thread_id: str) -> Thread:
 def _config(thread_id: str) -> dict:
     """LangGraph config. thread_id is the memory key for this conversation."""
     return {"configurable": {"thread_id": thread_id}}
+
+
+@app.exception_handler(GuardrailViolation)
+async def _guardrail_handler(request: Request, exc: GuardrailViolation):
+    # Bad user input -> 400 (client's fault); bad model output -> 502 (our fault).
+    status = 400 if exc.stage == "input" else 502
+    logger.warning("guardrail tripped [%s]: %s", exc.stage, exc.reason)
+    return JSONResponse(
+        status_code=status,
+        content={"detail": f"guardrail ({exc.stage}): {exc.reason}"},
+    )
 
 
 @app.get("/health")
@@ -106,6 +123,7 @@ async def chat_init(request: ThreadInitRequest, http_request: Request):
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, http_request: Request):
     thread = _resolve_thread(http_request, request.thread_id)
+    check_input(request.message)  # input guardrail -> 400 on violation
     agent = http_request.app.state.agent
     try:
         result = await agent.ainvoke(
@@ -117,15 +135,15 @@ async def chat(request: ChatRequest, http_request: Request):
         logger.exception("chat failed")
         raise HTTPException(status_code=502, detail="agent invocation failed") from exc
 
-    return ChatResponse(
-        thread_id=thread.thread_id,
-        response=result["structured_response"],
-    )
+    response = result["structured_response"]
+    check_output(response)  # output guardrail -> 502 on violation
+    return ChatResponse(thread_id=thread.thread_id, response=response)
 
 
 @app.post("/chat/stream")
 async def chat_stream(request: ChatRequest, http_request: Request):
     thread = _resolve_thread(http_request, request.thread_id)
+    check_input(request.message)  # input guardrail -> 400 on violation
     agent = http_request.app.state.agent
 
     async def generate():

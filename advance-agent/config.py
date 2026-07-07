@@ -22,6 +22,11 @@ class Settings(BaseModel):
     # Upstream weather API timeout (seconds)
     weather_timeout: float = float(os.getenv("WEATHER_TIMEOUT", "10"))
 
+    # LangSmith observability. LangChain/LangGraph auto-trace when these env
+    # vars are set — we only read them here to log status at startup.
+    langsmith_tracing: bool = os.getenv("LANGSMITH_TRACING", "false").lower() == "true"
+    langsmith_project: str = os.getenv("LANGSMITH_PROJECT", "weather-agent")
+
 
 @lru_cache
 def get_settings() -> Settings:

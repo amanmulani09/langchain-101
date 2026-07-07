@@ -1,1 +1,13 @@
+# Env / secrets
 .env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# LangGraph / local state
+*.sqlite
+
+# OS
+.DS_Store
