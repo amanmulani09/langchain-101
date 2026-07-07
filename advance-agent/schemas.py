@@ -20,24 +20,33 @@ class ResponseFormat(BaseModel):
     humidity: float
 
 
-class InitRequest(BaseModel):
-    """Start a new conversation for a user."""
+class SessionInitRequest(BaseModel):
+    """Log in: start a session for a user. Spans many chats until logout."""
 
     user_id: str = Field(..., min_length=1, examples=["user_1"])
 
 
-class InitResponse(BaseModel):
-    """Handed back to the frontend; thread_id is used on every later call."""
-
-    thread_id: str
+class SessionInitResponse(BaseModel):
+    session_id: str
     user_id: str
 
 
+class ThreadInitRequest(BaseModel):
+    """Open a new chat inside an existing session."""
+
+    session_id: str = Field(..., min_length=1)
+
+
+class ThreadInitResponse(BaseModel):
+    thread_id: str
+    session_id: str
+
+
 class ChatRequest(BaseModel):
-    """A turn in an existing conversation.
+    """A turn in an existing chat.
 
     The frontend sends only the opaque thread_id (from /chat/init) plus the
-    message. The server resolves the owning user_id from the thread_id.
+    message. The server resolves the owning session/user from the thread_id.
     """
 
     thread_id: str = Field(..., min_length=1)

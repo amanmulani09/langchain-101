@@ -13,10 +13,12 @@ from schemas import (
     ChatRequest,
     ChatResponse,
     Context,
-    InitRequest,
-    InitResponse,
+    SessionInitRequest,
+    SessionInitResponse,
+    ThreadInitRequest,
+    ThreadInitResponse,
 )
-from session import Session, SessionStore
+from session import SessionStore, Thread
 
 load_dotenv(find_dotenv())
 
@@ -50,15 +52,15 @@ app.add_middleware(
 )
 
 
-def _resolve_session(http_request: Request, thread_id: str) -> Session:
-    """Look up the session for a thread_id, or 404 if it was never started."""
-    session = http_request.app.state.sessions.get(thread_id)
-    if session is None:
+def _resolve_thread(http_request: Request, thread_id: str) -> Thread:
+    """Look up the thread for a thread_id, or 404 if it was never opened."""
+    thread = http_request.app.state.sessions.get_thread(thread_id)
+    if thread is None:
         raise HTTPException(
             status_code=404,
             detail="unknown thread_id — call POST /chat/init first",
         )
-    return session
+    return thread
 
 
 def _config(thread_id: str) -> dict:
@@ -71,47 +73,66 @@ async def health():
     return {"status": "ok"}
 
 
-@app.post("/chat/init", response_model=InitResponse)
-async def chat_init(request: InitRequest, http_request: Request):
-    """Start a conversation for a user and return an opaque thread_id.
+@app.post("/session", response_model=SessionInitResponse)
+async def session_init(request: SessionInitRequest, http_request: Request):
+    """Log in: start a session for a user. One session spans many chats."""
+    session = http_request.app.state.sessions.create_session(request.user_id)
+    return SessionInitResponse(session_id=session.session_id, user_id=session.user_id)
 
-    The frontend calls this once, stores the thread_id, and sends it on every
-    subsequent /chat call.
+
+@app.delete("/session/{session_id}", status_code=204)
+async def session_end(session_id: str, http_request: Request):
+    """Log out: end the session and drop all its chats."""
+    if not http_request.app.state.sessions.end_session(session_id):
+        raise HTTPException(status_code=404, detail="unknown session_id")
+
+
+@app.post("/chat/init", response_model=ThreadInitResponse)
+async def chat_init(request: ThreadInitRequest, http_request: Request):
+    """Open a new chat inside a session and return an opaque thread_id.
+
+    The frontend calls this per conversation, stores the thread_id, and sends
+    it on every subsequent /chat call.
     """
-    session = http_request.app.state.sessions.create(request.user_id)
-    return InitResponse(thread_id=session.thread_id, user_id=session.user_id)
+    thread = http_request.app.state.sessions.create_thread(request.session_id)
+    if thread is None:
+        raise HTTPException(
+            status_code=404,
+            detail="unknown session_id — call POST /session first",
+        )
+    return ThreadInitResponse(thread_id=thread.thread_id, session_id=thread.session_id)
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, http_request: Request):
-    session = _resolve_session(http_request, request.thread_id)
+    thread = _resolve_thread(http_request, request.thread_id)
     agent = http_request.app.state.agent
     try:
         result = await agent.ainvoke(
             {"messages": [{"role": "user", "content": request.message}]},
-            config=_config(session.thread_id),
-            context=Context(user_id=session.user_id),
+            config=_config(thread.thread_id),
+            context=Context(user_id=thread.user_id),
         )
     except Exception as exc:  # upstream model/tool failure
         logger.exception("chat failed")
         raise HTTPException(status_code=502, detail="agent invocation failed") from exc
 
     return ChatResponse(
-        thread_id=session.thread_id,
+        thread_id=thread.thread_id,
         response=result["structured_response"],
     )
 
 
 @app.post("/chat/stream")
 async def chat_stream(request: ChatRequest, http_request: Request):
-    session = _resolve_session(http_request, request.thread_id)
+    thread = _resolve_thread(http_request, request.thread_id)
     agent = http_request.app.state.agent
 
     async def generate():
         async for chunk, _meta in agent.astream(
             {"messages": [{"role": "user", "content": request.message}]},
-            config=_config(session.thread_id),
-            context=Context(user_id=session.user_id),
+            config=_config(thread.thread_id),
+            context=Context(user_id=thread.user_id),
             stream_mode="messages",
         ):
             text = getattr(chunk, "text", None)
