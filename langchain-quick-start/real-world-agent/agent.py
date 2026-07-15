@@ -1,6 +1,7 @@
 from langchain.agents import create_agent
 from llm import model
 from prompt import SYSTEM_PROMPT
+from schema import AgentResponseFormat
 from tools import fetch_text_from_url
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -11,7 +12,8 @@ agent = create_agent(
     system_prompt=SYSTEM_PROMPT,
     model=model,
     tools=[fetch_text_from_url],
-    checkpointer=checkpointer
+    checkpointer=checkpointer,
+    response_format=AgentResponseFormat
 )
 
 content = f"""Project Gutenberg hosts a full plain-text copy of F. Scott Fitzgerald's The Great Gatsby.
