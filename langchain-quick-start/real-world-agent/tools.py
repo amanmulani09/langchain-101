@@ -3,11 +3,8 @@ import urllib.request
 
 from langchain.tools import tool
 
-@tool('fetch_text_from_url')
+@tool('fetch_text_from_url',description="fetch the document from url")
 def fetch_text_from_url(url:str) -> str:
-    """
-    fetch the document from url
-    """
 
     req = urllib.request.Request(
         url,
@@ -21,3 +18,4 @@ def fetch_text_from_url(url:str) -> str:
         return f"Fetch failed : {e}"
     
     text = raw.decode("utf-8",errors="replace")
+    return text
