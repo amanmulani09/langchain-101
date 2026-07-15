@@ -9,6 +9,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 checkpointer = InMemorySaver()
 
 agent = create_agent(
+    name="text_converter_agent",
     system_prompt=SYSTEM_PROMPT,
     model=model,
     tools=[fetch_text_from_url],
@@ -30,6 +31,7 @@ your available tools and reasoning, do not fabricate numbers: use `null` for tha
 the limitation in `how_you_computed_counts`. If you encounter any errors please report what the error was and what the error message was."""
 
 
+config = {"configurable":{"thread_id":"great-gatsby-lc"}}
 agent_result = agent.invoke({
     "messages":[
         {
@@ -38,7 +40,7 @@ agent_result = agent.invoke({
         }
     ]
 },
-    config={"configurable":{"thread_id":"great-gatsby-lc"}}
+    config=config
 )
 
 print(agent_result["messages"][-1].content_blocks)
